@@ -1,0 +1,173 @@
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <stdio.h>
+#include <driver/gpio.h>
+#include <esp_log.h>
+
+
+//Declaración de variables globales e incializar funciones
+static const char*  TAG = "SII2024Tareas";
+TaskHandle_t handleATarea1, handleATarea2, handleATarea3; //aquí recibo el manejador para la tarea una vez creada
+esp_err_t er; // variable de retrono de error. 
+#define ESP_INTR_FLAG_DEFAULT 0  // nuevo
+#define buttonInterrupcion 27 // nnuevo
+static int icont=0;
+static TickType_t TiempoultimaISR; 
+
+
+//gpio_isr_register
+//gpio_install_isr_service() and gpio_isr_handler_add() API
+
+
+//funcion que ejecuta la interrupcion 
+void gpio_isr_handle(void *arg)
+{
+
+
+if (icont == 32000) icont=0;
+ 
+
+if (xTaskGetTickCountFromISR() > (TiempoultimaISR + 20) )
+{
+    icont++;
+    TiempoultimaISR = xTaskGetTickCountFromISR(); //guardo la ultima vez que se lanzó la interrupción. 
+    
+};
+
+
+}
+ 
+
+
+void initISR(){
+
+//declaración de la estrutura de datos asociada el GPIO que lanza una interrupción 
+gpio_config_t tgpioConfigISR ; 
+    //gpio_reset_pin(buttonInterrupcion);
+    tgpioConfigISR.pin_bit_mask = (1ULL << buttonInterrupcion);
+    tgpioConfigISR.mode = GPIO_MODE_DEF_INPUT;
+    tgpioConfigISR.pull_up_en = GPIO_PULLUP_DISABLE;
+    tgpioConfigISR.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    tgpioConfigISR.intr_type = GPIO_INTR_POSEDGE;
+
+
+// configuro el GPIO con los valores seteados previamente en la estructura
+gpio_config(&tgpioConfigISR);
+gpio_install_isr_service( ESP_INTR_FLAG_DEFAULT); 
+//if (er != ESP_OK) { ESP_LOGE(TAG, "Error al iniciar el servicio de Interrupciones!! \n")}; 
+
+gpio_isr_handler_add(buttonInterrupcion, gpio_isr_handle, NULL) ;
+
+icont=1;
+
+}
+
+
+
+
+//función que ejecutará la Tarea 1 
+void Tarea1(void *param)
+{// aquí está el códigode la tarea 
+unsigned long ulContador=0;
+
+for (;;)
+{
+    /* code */
+    ulContador++;
+    printf("Estoy dentro de la tarea 1. Vuelta [%lu] y ejecuta en el nucleo [%lu]\n", ulContador, (unsigned long) xTaskGetCoreID(handleATarea1) ); 
+    for ( long l = 0; l < 1000000; l++)
+    {
+        /* code */
+        xTaskGetCoreID(handleATarea1);
+
+    }
+    
+
+    vTaskDelay(30/ portTICK_PERIOD_MS); 
+}
+
+
+}
+
+
+//funcion que eejecuta la tarea 2 
+void Tarea2(void *param)
+{// aquí está el códigode la tarea 
+unsigned long ulContador=0;
+
+for (;;)
+{
+    /* code */
+    ulContador++;
+    printf("Estoy dentro de la tarea 2. Vuelta [%lu] y ejecuta en el nucleo [%lu]\n", ulContador, (unsigned long) xTaskGetCoreID(handleATarea2) ); 
+    for ( long l = 0; l < 1000000; l++)
+    {
+        /* code */
+        xTaskGetCoreID(handleATarea2);
+
+    }
+    
+
+    vTaskDelay(30/ portTICK_PERIOD_MS); 
+}
+
+
+}
+
+//funcion de la tarea 3
+void Tarea3(void *param)
+{// aquí está el códigode la tarea 
+unsigned long ulContador=0;
+
+for (;;)
+{
+    /* code */
+    ulContador++;
+    printf("Estoy dentro de la tarea 3. Vuelta [%lu] y ejecuta en el nucleo [%lu]\n", ulContador, (unsigned long) xTaskGetCoreID(handleATarea3) ); 
+    for ( long l = 0; l < 1000000; l++)
+    {
+        /* code */
+        xTaskGetCoreID(handleATarea3);
+
+    }
+    
+
+    vTaskDelay(30/ portTICK_PERIOD_MS); 
+}
+
+
+}
+
+
+
+void app_main() 
+{
+
+
+//creo 3 tareas 
+//xTaskCreate(Tarea1, "Tarea 1", 2048, NULL,1, &handleATarea1 );
+// Creo la tarea 1 y la asigno al segundo nucleo
+xTaskCreatePinnedToCore(Tarea1, "Tarea 1", 2048, NULL,1, &handleATarea1,0);
+
+// Creo la tarea 2 y la asigno al segundo nucleo
+xTaskCreatePinnedToCore(Tarea2, "Tarea 2", 2048, NULL,1, &handleATarea2,0);
+
+// Creo la tarea 3 y la asigno al segundo nucleo
+xTaskCreatePinnedToCore(Tarea3, "Tarea 3", 2048, NULL,1, &handleATarea3,0);
+
+//inicializo las interrupciones externas 
+initISR(); 
+
+
+    while (1)
+    {
+   // printf("Ejecutando el programa principaL ejecuta nucleo [%lu]\n", (unsigned long) xTaskGetCoreID(xTaskGetCurrentTaskHandle()));
+    printf("\n Contador ISR=[%d] - ULTTickCount=[%lu] - ActualTICK=[%lu]",icont, TiempoultimaISR, xTaskGetTickCountFromISR());
+    //printf("\n TickCount =[%lu]\n", TiempoultimaISR);
+    vTaskDelay(100/ portTICK_PERIOD_MS);
+
+
+
+
+    }
+}
