@@ -69,7 +69,8 @@ void InitISR()
 //Nota: generar dos estructuras 
 
 }
-
+ 
+ 
 //#pragma endregion Interrupciones
 
 //#pragma region Tareas
