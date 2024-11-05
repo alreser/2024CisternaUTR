@@ -26,9 +26,9 @@ long caudalContador=0;
 float caudaltemporal=0;
 float caudalHora=0; //Indica la cantidad de litros que salieron del tanque 
 
-volatile int tiempoInicio=0;
+volatile int tiempoInicio=0; //buscar mejor tipo de dato mas largo
 volatile int tiempoFin=0;
-float distancia=0; // indica la cantida de litros dentro del tanqie. Nivel. 
+float distancia=0; // indica la cantida de litros dentro del tanque. Nivel. 
 
 /*
 #define PinMotor 23  //DELETE
@@ -98,11 +98,11 @@ void ISRCaudalimetro(void *args)
 
 void CalcularCaudal(void *args)
 {
-    while(1){
+    static long indiceSegundo = 0;
+    float pulsosPorSegundo[3600] = {0};
+    float caudalAuxiliar = 0;
 
-        static long indiceSegundo = 0;
-        float pulsosPorSegundo[3600] = {0};
-        float caudalAuxiliar = 0;
+    while(1){
 
         caudaltemporal = caudalContador * 2.25 / 1000; //2,25ml por pulso
         
@@ -138,17 +138,22 @@ void IRAM_ATTR ISREcho(void *args) //IRAM_ATTR lo ejecuta en RAM en vez de ROM
 
 void CalculoDistancia(void *args)
 {
+
+    int duracion = 0;
+
     while (1) {
+        
         gpio_set_level(PinTrigger, 1); // Activa el Trigger
         vTaskDelay(pdMS_TO_TICKS(10)); // Mantiene el Trigger activo por 10 microsegundos
         gpio_set_level(PinTrigger, 0); // Desactiva el Trigger
         
 
         if (tiempoFin > tiempoInicio) {
-            int duracion = tiempoFin - tiempoInicio; // Duración del pulso en microsegundos
-            distancia = duracion / 1000000 * 343000 / 2; // Distancia (milimetros) = duracion en segundos * 343mm/s /2
+            duracion = tiempoFin - tiempoInicio; // Duración del pulso en microsegundos
+            distancia = duracion / 1000000 * 343000 / 2; // Distancia (milimetros) = duracion en segundos * 343000mm/s /2
         }
-
+        //caso de control de limite
+        //sincronizar que no hayan dos envios a la vez
         vTaskDelay(1000/ portTICK_PERIOD_MS); // Espera 1 segundo antes de la siguiente medición
 
     }
