@@ -12,6 +12,7 @@ SoC: ESP32
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_system.h>
 
 //Declaración de variables globales e inicializar funciones
 static const char*  TAG = "2024CisternaUTRs";
@@ -20,15 +21,19 @@ static const char*  TAG = "2024CisternaUTRs";
 #define PinCaudalimetro 35
 #define PinTrigger 0
 #define PinEcho 4 
+#define DistanciaMaximaCM 500 // 450 + ~10%
 
 //Declaracion de variables globales 
 long caudalContador=0; 
 float caudaltemporal=0;
 float caudalHora=0; //Indica la cantidad de litros que salieron del tanque 
 
-volatile int tiempoInicio=0;
-volatile int tiempoFin=0;
-float distancia=0; // indica la cantida de litros dentro del tanqie. Nivel. 
+volatile uint64_t  tiempoInicio=0;
+volatile uint64_t  tiempoFin=0;
+bool triggerDisponible = true;
+float distancia=0; // indica la cantida de litros dentro del tanque. Nivel. 
+uint64_t duracion=0;
+float timeout = 0; //microsegundos
 
 /*
 #define PinMotor 23  //DELETE
@@ -98,11 +103,11 @@ void ISRCaudalimetro(void *args)
 
 void CalcularCaudal(void *args)
 {
-    while(1){
-
         static long indiceSegundo = 0;
         float pulsosPorSegundo[3600] = {0};
-        float caudalAuxiliar = 0;
+        float caudalAuxiliar = 0;    
+
+        while(1){
 
         caudaltemporal = caudalContador * 2.25 / 1000; //2,25ml por pulso
         
@@ -130,27 +135,47 @@ void IRAM_ATTR ISREcho(void *args) //IRAM_ATTR lo ejecuta en RAM en vez de ROM
     if (gpio_get_level(PinEcho)) { // Flanco ascendente
         tiempoInicio = esp_timer_get_time(); // Guarda el tiempo de inicio
 
+
     } else { // Flanco descendente
         tiempoFin = esp_timer_get_time(); // Guarda el tiempo de finalización
 
+        if (tiempoFin > tiempoInicio) {
+            duracion = tiempoFin - tiempoInicio; // Duración del pulso en microsegundos
+            distancia = (duracion / 1000000) * 343000 / 2; // Distancia (milimetros) = duracion en segundos * 343000mm/s /2
+        }
     }
 }
 
 void CalculoDistancia(void *args)
 {
-    while (1) {
-        gpio_set_level(PinTrigger, 1); // Activa el Trigger
-        vTaskDelay(pdMS_TO_TICKS(10)); // Mantiene el Trigger activo por 10 microsegundos
-        gpio_set_level(PinTrigger, 0); // Desactiva el Trigger
-        
+    timeout = DistanciaMaximaCM * 2 * 10000 / 343;  // cm * 2 *m/100cm *s/343m *1000000us/s
+    float tiempoLimite = 0; // Tiempo límite para el timeout
 
-        if (tiempoFin > tiempoInicio) {
-            int duracion = tiempoFin - tiempoInicio; // Duración del pulso en microsegundos
-            distancia = duracion / 1000000 * 343000 / 2; // Distancia (milimetros) = duracion en segundos * 343mm/s /2
+    while (1)
+    {    
+        
+        if(!gpio_get_level(PinEcho)){
+
+            gpio_set_level(PinTrigger, 1); // Activa el Trigger
+            esp_rom_delay_us(10); // Mantiene el Trigger activo por al menos 10 microsegundos
+            gpio_set_level(PinTrigger, 0); // Desactiva el Trigger
+
+            
+            tiempoLimite = esp_timer_get_time() + timeout; // Timeout en microsegundos
+
+            // Espera a que el Echo regrese o a que se alcance el tiempo máximo
+            while (gpio_get_level(PinEcho) && esp_timer_get_time() < tiempoLimite) {
+                // Espera hasta que el Echo vuelva a 0 o se haya alcanzado el timeout
+            }
+
+            if (esp_timer_get_time() >= tiempoLimite) {
+                distancia = -1; // Indicamos que no hay medida disponible
+            }
+
         }
 
-        vTaskDelay(1000/ portTICK_PERIOD_MS); // Espera 1 segundo antes de la siguiente medición
-
+        vTaskDelay(500/ portTICK_PERIOD_MS); // Espera medio segundo antes de la siguiente medición
+    
     }
 }
 
@@ -209,14 +234,14 @@ void app_main()
 
     InitCaudalimetroISR();
     InitUltrasonico();
-    gpio_reset_pin(PinCaudalimetro);
 
+    gpio_reset_pin(PinCaudalimetro);
     gpio_set_direction(PinCaudalimetro, GPIO_MODE_DEF_OUTPUT); 
 
     gpio_reset_pin(PinTrigger);
     gpio_set_direction(PinTrigger, GPIO_MODE_DEF_OUTPUT); 
     gpio_reset_pin(PinEcho);
-    gpio_set_direction(PinEcho, GPIO_MODE_DEF_OUTPUT); 
+    gpio_set_direction(PinEcho, GPIO_MODE_DEF_INPUT); 
 
     xTaskCreate(CalcularCaudal, "CalcularCaudal", 2048, NULL, 1, NULL);
     xTaskCreate(CalculoDistancia, "TareaUltrasonido", 2048, NULL, 1, NULL);
