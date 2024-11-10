@@ -19,16 +19,17 @@ static const char*  TAG = "2024CisternaUTRs";
 
 
 #define PinCaudalimetro 35
+
 #define PinTrigger 32
 #define PinEcho 33
 #define DistanciaMaximaCM 500 // 450 + ~10%
 
 //Declaracion de variables globales 
-long caudalContador=1; 
+long caudalContador=0; 
 float caudaltemporal=0;
 float caudalHora=0; //Indica la cantidad de litros que salieron del tanque 
 static long indiceSegundo = 0;
-uint64_t pulsosPorSegundo[3600] = {0}; // Asignación dinámica
+float pulsosPorSegundo[3600] = {0}; // Asignación dinámica
 
 volatile uint64_t  tiempoInicio=0;
 volatile uint64_t  tiempoFin=0;
@@ -40,36 +41,41 @@ float timeout = 0; //microsegundos
 void ISRCaudalimetro(void *args)
 {
     caudalContador++;
-    //printf("CaudalContador =[%li]\n", caudalContador);
 }
 
 void CalcularCaudal(void *args)
 {
 
-        float caudalAuxiliar = 0;    
+    float caudalAuxiliar = 0;    
 
-        while(1){
+    while(1)
+    {
 
         caudaltemporal = caudalContador * 2.25 / 1000; //2,25ml por pulso
         
+        //printf("CaudalContador =[%li]\n", caudalContador);
+        //printf("CaudalTemporal =[%f]\n", caudaltemporal);
+
+        //portENTER_CRITICAL(&mux);
         caudalContador = 0; //reset contador
-        
+        //portEXIT_CRITICAL(&mux);
+
         pulsosPorSegundo[indiceSegundo] = caudaltemporal;  //sumatoria de L en la ultima hora
 
         indiceSegundo = (indiceSegundo + 1) % 3600;  // buffer temporal
         //printf("indiceSegundo =[%li]\n", indiceSegundo);
 
+        caudalAuxiliar = 0;
+        
         for (int i = 0 ; i < 3600 ; i++){
             caudalAuxiliar += pulsosPorSegundo[i];  //auxiliar para evitar que caudalhora alguna vez sea 0
         }
 
         caudalHora = caudalAuxiliar;
-        
-        caudalAuxiliar = 0;
 
-        //printf("Caudal =[%f]\n", caudalHora);
+        //printf("Caudal en ultima Hora =[%f]\n", caudalHora);
 
-        vTaskDelay(2000/ portTICK_PERIOD_MS); 
+        vTaskDelay(1000/ portTICK_PERIOD_MS); 
     }
 }
 
@@ -133,7 +139,7 @@ void InitCaudalimetroISR()
     gpioCaudalimetro.pin_bit_mask = (1ULL << PinCaudalimetro); 
     gpioCaudalimetro.mode = GPIO_MODE_INPUT;
     gpioCaudalimetro.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpioCaudalimetro.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    gpioCaudalimetro.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gpioCaudalimetro.intr_type = GPIO_INTR_ANYEDGE; // Detecta flanco de subida. y de bajada
     gpio_config(&gpioCaudalimetro);
 
@@ -164,17 +170,19 @@ void InitUltrasonico() {
 
 void app_main() 
 {
+    gpio_reset_pin(PinCaudalimetro);
+    gpio_reset_pin(PinTrigger);
+    gpio_reset_pin(PinEcho);
+
     gpio_install_isr_service(0);
+
     InitCaudalimetroISR();
     InitUltrasonico();
 
-
-    gpio_reset_pin(PinCaudalimetro);
     gpio_set_direction(PinCaudalimetro, GPIO_MODE_INPUT); 
 
-    gpio_reset_pin(PinTrigger);
+
     gpio_set_direction(PinTrigger, GPIO_MODE_DEF_OUTPUT); 
-    gpio_reset_pin(PinEcho);
     gpio_set_direction(PinEcho, GPIO_MODE_DEF_INPUT); 
 
     xTaskCreate(CalcularCaudal, "CalcularCaudal", 2048, NULL, 1, NULL);
