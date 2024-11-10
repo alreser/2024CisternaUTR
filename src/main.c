@@ -22,7 +22,7 @@ static const char*  TAG = "2024CisternaUTRs";
 
 #define PinTrigger 32
 #define PinEcho 33
-#define DistanciaMaximaCM 500 // 450 + ~10%
+#define DistanciaMaximaCM 900 // 800 + ~10%
 
 //Declaracion de variables globales 
 long caudalContador=0; 
@@ -37,6 +37,7 @@ bool triggerDisponible = true;
 float distancia=0; // indica la cantida de litros dentro del tanque. Nivel. 
 uint64_t duracion=0;
 float timeout = 0; //microsegundos
+float tiempoLimite = 0; // Tiempo límite para el timeout
 
 void ISRCaudalimetro(void *args)
 {
@@ -81,7 +82,7 @@ void CalcularCaudal(void *args)
 
 void IRAM_ATTR ISREcho(void *args) //IRAM_ATTR lo ejecuta en RAM en vez de ROM
 {
-    printf("3\n");
+    //printf("interrupcion\n");
     if (gpio_get_level(PinEcho)) { // Flanco ascendente
         tiempoInicio = esp_timer_get_time(); // Guarda el tiempo de inicio
 
@@ -91,8 +92,8 @@ void IRAM_ATTR ISREcho(void *args) //IRAM_ATTR lo ejecuta en RAM en vez de ROM
 
         if (tiempoFin > tiempoInicio) {
             duracion = tiempoFin - tiempoInicio; // Duración del pulso en microsegundos
-            distancia = (duracion / 1000000) * 343000 / 2; // Distancia (milimetros) = duracion en segundos * 343000mm/s /2
-            printf("duracion=[%li]  Distancia=[%f]\n", caudalContador,distancia);
+            distancia = duracion * 0.343 / 2; // Distancia (milimetros) = duracion en segundos * 343000mm/s /2
+            //printf("duracion=[%li]  Distancia=[%f]\n", caudalContador,distancia);
         }
     }
 }
@@ -100,24 +101,29 @@ void IRAM_ATTR ISREcho(void *args) //IRAM_ATTR lo ejecuta en RAM en vez de ROM
 void CalculoDistancia(void *args)
 {
     timeout = DistanciaMaximaCM * 2 * 10000 / 343;  // cm * 2 *m/100cm *s/343m *1000000us/s
-    float tiempoLimite = 0; // Tiempo límite para el timeout
-
+    
     while (1)
     {    
-        
-        if(!gpio_get_level(PinEcho)){
+        printf("EMPIEZA CICLO. Trigger: %d. Echo: %d\n", gpio_get_level(PinTrigger), gpio_get_level(PinEcho));
+        printf("Tiempo Inicio =[%"PRIu64"]. Tiempo Fin =[%"PRIu64"]. Duracion =[%"PRIu64"]\n", tiempoInicio, tiempoFin, duracion);
 
+
+        if(gpio_get_level(!PinEcho)){
+
+            gpio_set_level(PinTrigger, 0); // Desactiva el Trigger
+            esp_rom_delay_us(2);   //aseguro reseteo
             gpio_set_level(PinTrigger, 1); // Activa el Trigger
-            esp_rom_delay_us(15); // Mantiene el Trigger activo por al menos 10 microsegundos
+            esp_rom_delay_us(10); // Mantiene el Trigger activo por al menos 10 microsegundos
             gpio_set_level(PinTrigger, 0); // Desactiva el Trigger
 
             printf("Trigger: %d. Echo: %d\n", gpio_get_level(PinTrigger), gpio_get_level(PinEcho));
+            
             
             tiempoLimite = esp_timer_get_time() + timeout; // Timeout en microsegundos
 
             // Espera a que el Echo regrese o a que se alcance el tiempo máximo
             while (gpio_get_level(PinEcho) && esp_timer_get_time() < tiempoLimite) {
-                printf("Tiempo Limite =[%f]. Yo atrapado en while\n", tiempoLimite);
+                printf("Tiempo Limite =[%f]. Esperando al Echo o al Timeout\n", tiempoLimite);
                 // Espera hasta que el Echo vuelva a 0 o se haya alcanzado el timeout
             }
 
@@ -125,11 +131,12 @@ void CalculoDistancia(void *args)
                 distancia = -1; // Resolver que hacer si tenemos un timeout
                 printf("Tiempo Limite sobrepasado =[%f]\n", tiempoLimite);
             }
-
+            
         }
 
-        vTaskDelay(500/ portTICK_PERIOD_MS); // Espera medio segundo antes de la siguiente medición
-    
+        vTaskDelay(1000/ portTICK_PERIOD_MS); // Espera un segundo antes de la siguiente medición
+        printf("Distancia=[%f]\n", distancia);
+
     }
 }
 
@@ -147,23 +154,14 @@ void InitCaudalimetroISR()
 }
  
 void InitUltrasonico() {
-    // Configura el pin Trigger como salida
-    gpio_config_t triggerConfig;
-    triggerConfig.pin_bit_mask = (1ULL << PinTrigger);
-    triggerConfig.mode = GPIO_MODE_OUTPUT;
-    triggerConfig.pull_up_en = GPIO_PULLUP_DISABLE;
-    triggerConfig.pull_down_en = GPIO_PULLDOWN_DISABLE; 
-    gpio_config(&triggerConfig);
-
     // Configura el pin Echo como entrada
     gpio_config_t echoConfig;
     echoConfig.pin_bit_mask = (1ULL << PinEcho);
     echoConfig.mode = GPIO_MODE_INPUT;
-    echoConfig.pull_up_en = GPIO_PULLUP_ENABLE;
+    echoConfig.pull_up_en = GPIO_PULLUP_DISABLE;
     echoConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
     echoConfig.intr_type = GPIO_INTR_ANYEDGE;
     gpio_config(&echoConfig);
-
 
     gpio_isr_handler_add(PinEcho, ISREcho, NULL);
 }
@@ -185,9 +183,9 @@ void app_main()
     gpio_set_direction(PinTrigger, GPIO_MODE_DEF_OUTPUT); 
     gpio_set_direction(PinEcho, GPIO_MODE_DEF_INPUT); 
 
+
     xTaskCreate(CalcularCaudal, "CalcularCaudal", 2048, NULL, 1, NULL);
     xTaskCreate(CalculoDistancia, "TareaUltrasonido", 2048, NULL, 1, NULL);
-
 
     /*while (1)
     {
